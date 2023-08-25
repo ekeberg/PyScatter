@@ -7,8 +7,10 @@ from eke import conversions
 import numpy
 
 
-pdbfile = "/Users/ekeberg/Work/Scratch/4o01.pdb"
+# pdbfile = "/Users/ekeberg/Work/Scratch/4o01.pdb"
 # pdbfile = "/Users/ekeberg/Work/My Papers/GroEL/Figures/PDBfiles/1SS8_H2O_35_cyl.pdb"
+# pdbfile = "/home/ekeberg/Data/Simulated/Variation/Phytochrome/pdb_files/4o01.pdb"
+pdbfile = "/home/ekeberg/Work/scratch/CondorExamples/1ss8.pdb1"
 
 # photon_energy = 1200
 photon_energy = 3000
@@ -23,6 +25,7 @@ pattern_shape = (128, 128)
 rot = rotmodule.random()
 
 w = time_tools.StopWatch()
+
 w.start()
 # pdb = PyScatter.SimplePDB(pdbfile)
 pdb = PyScatter.SloppyPDB(pdbfile)
@@ -61,11 +64,13 @@ w.stop()
 
 print(f"Condor took {w.time()} s")
 
-vmax = max(pattern.max(), condor_pattern.max())
-vmin = vmax * 1e-7
 
 def plot_results():
     import matplotlib.pyplot
+
+    vmax = max(pattern.max(), condor_pattern.max())
+    vmin = vmax * 1e-7
+
     fig = matplotlib.pyplot.figure("Compare")
     fig.clear()
     ax = fig.subplots(1, 2)

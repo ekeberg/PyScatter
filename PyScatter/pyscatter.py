@@ -54,6 +54,7 @@ def cpu_array(array):
 if cupy and cupy.cuda.is_available():
     set_backend(Backend.CUPY)
     print("Using Cupy backend")
+    from . import cuda_extensions
 else:
     set_backend(Backend.CPU)
     print("Using CPU backend")
@@ -336,7 +337,14 @@ class Source:
                                   / self.photon_energy)
         self.intensity = self.number_of_photons / self.area
 
+
 def calculate_fourier_from_pdb(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
+    if cupy_on():
+        return calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation)
+    else:
+        return calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation)
+
+def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
     S = detector.scattering_vector(photon_energy, rotation)
     
     sf = StructureFactors()
@@ -344,19 +352,39 @@ def calculate_fourier_from_pdb(pdb, detector, photon_energy, rotation=(1, 0, 0, 
         sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=0))
     
     diff = complex_type(numpy.zeros(detector.shape))
-    for coord, element, occupancy in zip(pdb.coords, pdb.elements, pdb.occupancy):
+
+    for coord, occupancy, element in zip(pdb.coords, pdb.occupancy, pdb.elements):
         coord_slice = (slice(None), ) + (None, )*len(S.shape[1:])
         dotp = (coord[coord_slice] * S).sum(axis=0)
         diff += (sf.precalculated[element] * occupancy *
                  numpy.exp(2j * numpy.pi * dotp))
-
     return diff
 
+
+def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
+    S = detector.scattering_vector(photon_energy, rotation)
+
+    sf = StructureFactors()
+    for element in pdb.unique_elements():
+        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=0))
+
+    diff = complex_type(numpy.zeros(detector.shape))
+
+    unique_elements = list(always_numpy.unique(pdb.elements))
+    for element in unique_elements:
+        selection = numpy.asarray(always_numpy.array(pdb.elements) == element, dtype="bool")
+        element_coords = cupy.ascontiguousarray(pdb.coords[selection], dtype="float32")
+        element_occupancy = cupy.ascontiguousarray(pdb.occupancy[selection], dtype="float32")
+
+        element_diff = numpy.zeros_like(diff)
+        cuda_extensions.calculate_scattering(element_diff, S, element_coords, element_occupancy)
+        diff += sf.precalculated[element] * element_diff
+    return diff
 
 def calculate_pattern_from_pdb(pdb, detector, source, rotation=(1, 0, 0, 0)):
     diff = calculate_fourier_from_pdb(
         pdb, detector, source.photon_energy, rotation)
-    pattern  = abs(diff)**2
+    pattern = abs(diff)**2
     pattern *= detector.solid_angle()
     pattern *= cross_section(detector, source.photon_energy, source.polarization_angle)
     pattern *= source.intensity

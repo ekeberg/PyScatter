@@ -91,7 +91,7 @@ class SimplePDB(AbstractPDB):
         self.coords = always_numpy.zeros((self.natoms, 3))
         self.elements = []
         # self.occupancy = real_type(numpy.zeros(self.natoms))
-        self.occupancy = alwaysnumpy.zeros(self.natoms)
+        self.occupancy = always_numpy.zeros(self.natoms)
 
         for i, a in enumerate(atoms):
             self.coords[i, :] = a.get_coord()*1e-10 # Convert to m
@@ -261,6 +261,9 @@ class FourierDetector:
             numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, shape[1]),
             numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, shape[2]),
             indexing="ij")
+        self._x = real_type(self._x)
+        self._y = real_type(self._y)
+        self._z = real_type(self._z)
 
     def scattering_angle(self):
         # return 2* numpy.arcsin(1/numpy.sqrt(self._x**2 + self._y**2 + self._z**2)/2)

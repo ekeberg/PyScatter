@@ -63,13 +63,13 @@ import Bio.PDB
 import pickle
 from eke import conversions
 from eke import constants
-from eke import rotmodule
 from eke import elements
 
 try:
     import nfft
 except ImportError:
     nfft = None
+
 
 class AbstractPDB:
     def __init__(self, filename):
@@ -78,6 +78,7 @@ class AbstractPDB:
     def unique_elements(self):
         # return numpy.unique(self.elements)
         return list(set(self.elements))
+
 
 class SimplePDB(AbstractPDB):
     """Uses the Biopython parser"""
@@ -94,7 +95,7 @@ class SimplePDB(AbstractPDB):
         self.occupancy = always_numpy.zeros(self.natoms)
 
         for i, a in enumerate(atoms):
-            self.coords[i, :] = a.get_coord()*1e-10 # Convert to m
+            self.coords[i, :] = a.get_coord()*1e-10  # Convert to m
             self.elements.append(a.element)
             self.occupancy[i] = a.occupancy
 
@@ -111,8 +112,8 @@ class SloppyPDB(AbstractPDB):
         self.occupancy = []
         
         with open(filename) as f:
-            for l in f.readlines():
-                atom = self._parse_line(l)
+            for line in f.readlines():
+                atom = self._parse_line(line)
 
                 if atom is not None:
                     self.coords.append(atom["coord"])
@@ -123,15 +124,15 @@ class SloppyPDB(AbstractPDB):
         self.occupancy = real_type(numpy.array(self.occupancy))
         self.natoms = len(self.elements)
                     
-    def _parse_line(self, l):
-        if (l[:4].upper() == "ATOM" or
-            l[:6].upper() == "HETATM"):
+    def _parse_line(self, line):
+        if (line[:4].upper() == "ATOM" or
+                line[:6].upper() == "HETATM"):
             atom = {}
-            atom["element"] = l[77:78+1].strip()
-            atom["coord"] = (float(l[31:38+1].strip())*1e-10,
-                             float(l[39:46+1].strip())*1e-10,
-                             float(l[47:54+1].strip())*1e-10)
-            atom["occupancy"] = float(l[55:60+1].strip())
+            atom["element"] = line[77:78+1].strip()
+            atom["coord"] = (float(line[31:38+1].strip())*1e-10,
+                             float(line[39:46+1].strip())*1e-10,
+                             float(line[47:54+1].strip())*1e-10)
+            atom["occupancy"] = float(line[55:60+1].strip())
             return atom
         else:
             return None
@@ -151,8 +152,10 @@ class MapSample:
 
     def shape(self):
         if len(self.maps) == 0:
-            raise ValueError("Can not get shape of sample with no density added to it")
+            raise ValueError("Can not get shape of sample since there is no "
+                             "density added to it")
         return self.maps[0].shape
+
 
 def quaternion_to_matrix(quat):
     """Dummy docstring"""
@@ -187,7 +190,8 @@ def rotate(quat, coordinates):
     rotation_matrix = quaternion_to_matrix(quat)
     # return rotation_matrix.dot(coordinates.T).T
     # return rotation_matrix.dot(coordinates)
-    coordinates_flat = coordinates.reshape((coordinates.shape[0], always_numpy.product(coordinates.shape[1:])))
+    coordinates_flat = coordinates.reshape(
+        (coordinates.shape[0], always_numpy.product(coordinates.shape[1:])))
     rotated_flat = rotation_matrix.dot(coordinates_flat)
     return rotated_flat.reshape(coordinates.shape)
 
@@ -235,8 +239,9 @@ class RectangularDetector:
         return area / distance
 
     def _omega(self, width, height):
-        return 4 * numpy.arcsin(numpy.sin(numpy.arctan(width/2/self.distance)) *
-                                numpy.sin(numpy.arctan(height/2/self.distance)))
+        return 4 * numpy.arcsin(
+            numpy.sin(numpy.arctan(width/2/self.distance)) *
+            numpy.sin(numpy.arctan(height/2/self.distance)))
     
     def solid_angle(self):
         sa = (self._omega(2 * (self.x+self.pixel_size[0]/2),
@@ -257,17 +262,16 @@ class FourierDetector:
         unscaled_fourier_max = (2*numpy.sin(max_scatt_angle/2))
 
         self._x, self._y, self._z = numpy.meshgrid(
-            numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, shape[0]),
-            numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, shape[1]),
-            numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, shape[2]),
+            *[numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, s)
+              for s in self.shape],
             indexing="ij")
         self._x = real_type(self._x)
         self._y = real_type(self._y)
         self._z = real_type(self._z)
 
     def scattering_angle(self):
-        # return 2* numpy.arcsin(1/numpy.sqrt(self._x**2 + self._y**2 + self._z**2)/2)
-        return 2 * numpy.arcsin((numpy.sqrt(self._x**2 + self._y**2 + self._z**2)/2))
+        dist = numpy.sqrt(self._x**2 + self._y**2 + self._z**2)
+        return 2 * numpy.arcsin(dist/2)
 
     def scattering_vector(self, photon_energy, rotation=(1, 0, 0, 0)):
         wavelength = conversions.ev_to_m(photon_energy)
@@ -305,8 +309,10 @@ def cross_section(detector, photon_energy, polarization_angle=None):
                          detector.scattering_angle(),
                          polarization_angle)
 
+
 import pathlib
-STRUCTURE_FACTOR_TABLE = pickle.load(open(pathlib.Path(__file__).parent / "structure_factors.p", "rb"))
+STRUCTURE_FACTOR_TABLE = pickle.load(open(
+    pathlib.Path(__file__).parent / "structure_factors.p", "rb"))
                                           
 
 class StructureFactors:
@@ -326,11 +332,13 @@ class StructureFactors:
                 p[6]*numpy.exp(-p[7]*s_A_half**2) + p[8])
 
     def precalculate_for_element(self, element, S_array):
-        self.precalculated[element] = real_type(self.structure_factor(element, S_array))
+        self.precalculated[element] = real_type(
+            self.structure_factor(element, S_array))
 
 
 class Source:
-    def __init__(self, photon_energy, beam_energy, diameter, polarization_angle=None):
+    def __init__(self, photon_energy, beam_energy, diameter,
+                 polarization_angle=None):
         self.photon_energy = photon_energy
         self.beam_energy = beam_energy
         self.diameter = diameter
@@ -341,13 +349,18 @@ class Source:
         self.intensity = self.number_of_photons / self.area
 
 
-def calculate_fourier_from_pdb(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
+def calculate_fourier_from_pdb(pdb, detector, photon_energy,
+                               rotation=(1, 0, 0, 0)):
     if cupy_on():
-        return calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation)
+        return calculate_fourier_from_pdb_cuda(
+            pdb, detector, photon_energy, rotation)
     else:
-        return calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation)
+        return calculate_fourier_from_pdb_cpu(
+            pdb, detector, photon_energy, rotation)
 
-def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
+
+def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy,
+                                   rotation=(1, 0, 0, 0)):
     S = detector.scattering_vector(photon_energy, rotation)
     
     sf = StructureFactors()
@@ -356,7 +369,8 @@ def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation=(1, 0,
     
     diff = complex_type(numpy.zeros(detector.shape))
 
-    for coord, occupancy, element in zip(pdb.coords, pdb.occupancy, pdb.elements):
+    atom_iterator = zip(pdb.coords, pdb.occupancy, pdb.elements)
+    for coord, occupancy, element in atom_iterator:
         coord_slice = (slice(None), ) + (None, )*len(S.shape[1:])
         dotp = (coord[coord_slice] * S).sum(axis=0)
         diff += (sf.precalculated[element] * occupancy *
@@ -364,7 +378,8 @@ def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy, rotation=(1, 0,
     return diff
 
 
-def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation=(1, 0, 0, 0)):
+def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy,
+                                    rotation=(1, 0, 0, 0)):
     S = detector.scattering_vector(photon_energy, rotation)
 
     sf = StructureFactors()
@@ -375,14 +390,19 @@ def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation=(1, 0
 
     unique_elements = list(always_numpy.unique(pdb.elements))
     for element in unique_elements:
-        selection = numpy.asarray(always_numpy.array(pdb.elements) == element, dtype="bool")
-        element_coords = cupy.ascontiguousarray(pdb.coords[selection], dtype="float32")
-        element_occupancy = cupy.ascontiguousarray(pdb.occupancy[selection], dtype="float32")
+        selection = numpy.asarray(always_numpy.array(pdb.elements) == element,
+                                  dtype="bool")
+        element_coords = cupy.ascontiguousarray(pdb.coords[selection],
+                                                dtype="float32")
+        element_occupancy = cupy.ascontiguousarray(pdb.occupancy[selection],
+                                                   dtype="float32")
 
         element_diff = numpy.zeros_like(diff)
-        cuda_extensions.calculate_scattering(element_diff, S, element_coords, element_occupancy)
+        cuda_extensions.calculate_scattering(
+            element_diff, S, element_coords, element_occupancy)
         diff += sf.precalculated[element] * element_diff
     return diff
+
 
 def calculate_pattern_from_pdb(pdb, detector, source, rotation=(1, 0, 0, 0)):
     diff = calculate_fourier_from_pdb(
@@ -405,7 +425,9 @@ def get_scat_map(distribution, material, pixel_size, photon_energy):
     scat_map = distribution * f_sum
     return scat_map
 
-def calculate_fourier_from_map(sample, detector, photon_energy, rotation=(1, 0, 0, 0)):
+
+def calculate_fourier_from_map(sample, detector, photon_energy,
+                               rotation=(1, 0, 0, 0)):
     if nfft is None:
         raise RuntimeError("Could not import nfft")
 
@@ -418,15 +440,21 @@ def calculate_fourier_from_map(sample, detector, photon_energy, rotation=(1, 0, 
                                           photon_energy)
 
     S = detector.scattering_vector(photon_energy, rotation)
-    diff = nfft.nfft(total_density_map, sample.pixel_size, S.reshape((3, numpy.product(detector.shape))).T).reshape(detector.shape)
+    S_transpose = S.reshape((3, numpy.product(detector.shape))).T
+    diff = nfft.nfft(total_density_map, sample.pixel_size, S_transpose)
+    diff = diff.reshape(detector.shape)
     return diff
+
 
 def fourier_to_pattern(diff, detector, source):
     pattern = abs(diff)**2
     pattern *= detector.solid_angle()
-    pattern *= cross_section(detector, source.photon_energy, source.polarization_angle)
+    pattern *= cross_section(detector,
+                             source.photon_energy,
+                             source.polarization_angle)
     pattern *= source.intensity
     return pattern
+
 
 def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
     if isinstance(sample, MapSample):

@@ -387,10 +387,7 @@ def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy, rotation=(1, 0
 def calculate_pattern_from_pdb(pdb, detector, source, rotation=(1, 0, 0, 0)):
     diff = calculate_fourier_from_pdb(
         pdb, detector, source.photon_energy, rotation)
-    pattern = abs(diff)**2
-    pattern *= detector.solid_angle()
-    pattern *= cross_section(detector, source.photon_energy, source.polarization_angle)
-    pattern *= source.intensity
+    pattern = fourier_to_pattern(diff, detector, source)
     return pattern
 
 
@@ -424,6 +421,13 @@ def calculate_fourier_from_map(sample, detector, photon_energy, rotation=(1, 0, 
     diff = nfft.nfft(total_density_map, sample.pixel_size, S.reshape((3, numpy.product(detector.shape))).T).reshape(detector.shape)
     return diff
 
+def fourier_to_pattern(diff, detector, source):
+    pattern = abs(diff)**2
+    pattern *= detector.solid_angle()
+    pattern *= cross_section(detector, source.photon_energy, source.polarization_angle)
+    pattern *= source.intensity
+    return pattern
+
 def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
     if isinstance(sample, MapSample):
         diff = calculate_fourier_from_map(
@@ -431,10 +435,7 @@ def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
     elif isinstance(sample, AbstractPDB):
         diff = calculate_fourier_from_pdb(
             sample, detector, source.photon_energy, rotation)
-    pattern = abs(diff)**2
-    pattern *= detector.solid_angle()
-    pattern *= cross_section(detector, source.photon_energy, source.polarization_angle)
-    pattern *= source.intensity
+    pattern = fourier_to_pattern(diff, detector, source)
     return pattern
     
 

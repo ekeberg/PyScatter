@@ -82,9 +82,11 @@ class AbstractPDB:
 
 class SimplePDB(AbstractPDB):
     """Uses the Biopython parser"""
-    def __init__(self, filename):
+    def __init__(self, filename, bfactor=False):
         self._parser = Bio.PDB.PDBParser(QUIET=False)
         self.struct = self._parser.get_structure("foo", filename)
+
+        self.use_bfactor = bool(bfactor)
 
         atoms = [a for a in self.struct.get_atoms()]
         self.natoms = len(atoms)
@@ -94,10 +96,15 @@ class SimplePDB(AbstractPDB):
         # self.occupancy = real_type(numpy.zeros(self.natoms))
         self.occupancy = always_numpy.zeros(self.natoms)
 
+        if self.use_bfactor:
+            self.bfactor = always_numpy.zeros(self.natoms)
+
         for i, a in enumerate(atoms):
             self.coords[i, :] = a.get_coord()*1e-10  # Convert to m
             self.elements.append(a.element)
             self.occupancy[i] = a.occupancy
+            if self.use_bfactor:
+                self.bfactor[i] = a.bfactor * 1e-20  # Convert to m^2
 
         self.coords = real_type(self.coords)
         self.occupancy = real_type(self.occupancy)
@@ -105,11 +112,15 @@ class SimplePDB(AbstractPDB):
 
 class SloppyPDB(AbstractPDB):
     """Reads all atoms, regardless of if it makes sense or not"""
-    def __init__(self, filename):
+    def __init__(self, filename, bfactor=False):
+
+        self.use_bfactor = bool(bfactor)
 
         self.coords = []
         self.elements = []
         self.occupancy = []
+        if self.use_bfactor:
+            self.bfactor = []
         
         with open(filename) as f:
             for line in f.readlines():
@@ -119,9 +130,13 @@ class SloppyPDB(AbstractPDB):
                     self.coords.append(atom["coord"])
                     self.elements.append(atom["element"])
                     self.occupancy.append(atom["occupancy"])
+                    if self.use_bfactor:
+                        self.bfactor.append(atom["bfactor"])
 
         self.coords = real_type(numpy.array(self.coords))
         self.occupancy = real_type(numpy.array(self.occupancy))
+        if self.use_bfactor:
+            self.bfactor = real_type(numpy.array(self.bfactor))
         self.natoms = len(self.elements)
                     
     def _parse_line(self, line):
@@ -133,6 +148,8 @@ class SloppyPDB(AbstractPDB):
                              float(line[39:46+1].strip())*1e-10,
                              float(line[47:54+1].strip())*1e-10)
             atom["occupancy"] = float(line[55:60+1].strip())
+            if self.use_bfactor:
+                atom["bfactor"] = float(line[61:66+1].strip()) * 1e-20
             return atom
         else:
             return None
@@ -194,9 +211,15 @@ def rotate(quat, coordinates):
     rotation_matrix = quaternion_to_matrix(quat)
     # return rotation_matrix.dot(coordinates.T).T
     # return rotation_matrix.dot(coordinates)
+
+    # coordinates_flat = coordinates.reshape(
+    #     (coordinates.shape[0], always_numpy.product(coordinates.shape[1:])))
+    # rotated_flat = rotation_matrix.dot(coordinates_flat)
+    # return rotated_flat.reshape(coordinates.shape)
+
     coordinates_flat = coordinates.reshape(
-        (coordinates.shape[0], always_numpy.product(coordinates.shape[1:])))
-    rotated_flat = rotation_matrix.dot(coordinates_flat)
+        (always_numpy.product(coordinates.shape[:-1]), 3))
+    rotated_flat = coordinates_flat @ rotation_matrix.T
     return rotated_flat.reshape(coordinates.shape)
 
 
@@ -225,10 +248,14 @@ class RectangularDetector:
         s0 = 1/wavelength * real_type(numpy.array([0, 0, 1]))
 
         s1_norm = numpy.sqrt(self.x**2 + self.y**2 + self.z**2)
-        s1 = numpy.array([1/wavelength * self.x / s1_norm,
+        # s1 = numpy.array([1/wavelength * self.x / s1_norm,
+        #                   1/wavelength * self.y / s1_norm,
+        #                   1/wavelength * self.z / s1_norm])
+        # S = s1 - s0[:, numpy.newaxis, numpy.newaxis]
+        s1 = numpy.stack([1/wavelength * self.x / s1_norm,
                           1/wavelength * self.y / s1_norm,
-                          1/wavelength * self.z / s1_norm])
-        S = s1 - s0[:, numpy.newaxis, numpy.newaxis]
+                          1/wavelength * self.z / s1_norm], axis=2)
+        S = s1 - s0[numpy.newaxis, numpy.newaxis, :]
         S_rot = rotate(rotation, S)
         return S_rot
 
@@ -279,7 +306,8 @@ class FourierDetector:
 
     def scattering_vector(self, photon_energy, rotation=(1, 0, 0, 0)):
         wavelength = conversions.ev_to_m(photon_energy)
-        S = 1/wavelength * numpy.array((self._x, self._y, self._z))
+        # S = 1/wavelength * numpy.array((self._x, self._y, self._z))
+        S = 1/wavelength * numpy.stack((self._x, self._y, self._z), axis=3)
         S_rot = rotate(rotation, S)
         return S_rot
 
@@ -369,16 +397,27 @@ def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy,
     
     sf = StructureFactors()
     for element in pdb.unique_elements():
-        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=0))
+        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=-1))
     
     diff = complex_type(numpy.zeros(detector.shape))
 
+    if pdb.use_bfactor:
+        S_abs = numpy.linalg.norm(S, axis=-1)
+
     atom_iterator = zip(pdb.coords, pdb.occupancy, pdb.elements)
     for coord, occupancy, element in atom_iterator:
-        coord_slice = (slice(None), ) + (None, )*len(S.shape[1:])
-        dotp = (coord[coord_slice] * S).sum(axis=0)
-        diff += (sf.precalculated[element] * occupancy *
-                 numpy.exp(2j * numpy.pi * dotp))
+        # coord_slice = (slice(None), ) + (None, )*len(S.shape[:-1])
+        # dotp = (coord[coord_slice] * S).sum(axis=0)
+        # dotp = (coord * S).sum(axis=-1)
+        dotp = S @ coord
+
+        atom_diff = (sf.precalculated[element] * occupancy *
+                     numpy.exp(2j * numpy.pi * dotp))
+
+        if pdb.use_bfactor:
+            atom_diff *= numpy.exp(-pdb.bfactor * S_abs**2 * 0.25)
+
+        diff += atom_diff
     return diff
 
 
@@ -388,7 +427,7 @@ def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy,
 
     sf = StructureFactors()
     for element in pdb.unique_elements():
-        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=0))
+        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=-1))
 
     diff = complex_type(numpy.zeros(detector.shape))
 
@@ -400,10 +439,17 @@ def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy,
                                                 dtype="float32")
         element_occupancy = cupy.ascontiguousarray(pdb.occupancy[selection],
                                                    dtype="float32")
+        
+        if pdb.use_bfactor:
+            element_bfactor = cupy.ascontiguousarray(
+                pdb.bfactor[selection], dtype="float32")
+        else:
+            element_bfactor = None
 
         element_diff = numpy.zeros_like(diff)
         cuda_extensions.calculate_scattering(
-            element_diff, S, element_coords, element_occupancy)
+            element_diff, S, element_coords, element_occupancy,
+            bfactor=element_bfactor)
         diff += sf.precalculated[element] * element_diff
     return diff
 
@@ -444,8 +490,9 @@ def calculate_fourier_from_map(sample, detector, photon_energy,
                                           photon_energy)
 
     S = detector.scattering_vector(photon_energy, rotation)
-    S_transpose = S.reshape((3, numpy.product(detector.shape))).T
-    diff = nfft.nfft(total_density_map, sample.pixel_size, S_transpose)
+    # S_transpose = S.reshape((3, numpy.product(detector.shape))).T
+    S_flat = S.reshape((numpy.product(detector.shape), 3))
+    diff = nfft.nfft(total_density_map, sample.pixel_size, S_flat)
     diff = diff.reshape(detector.shape)
     return diff
 

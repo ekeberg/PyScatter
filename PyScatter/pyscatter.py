@@ -498,7 +498,7 @@ def calculate_fourier_from_map(sample, detector, photon_energy,
 
 
 def calculate_fourier_from_sphere(sample, detector, photon_energy):
-    S = numpy.linalg.norm(detector.scattering_vector(photon_energy, (1, 0, 0, 0)), axis=0)
+    S = numpy.linalg.norm(detector.scattering_vector(photon_energy, (1, 0, 0, 0)), axis=2)
 
     f_sum = 0
     for element, ratio in sample.material.element_mass_ratios().items():

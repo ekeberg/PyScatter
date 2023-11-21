@@ -156,6 +156,10 @@ class MapSample:
                              "density added to it")
         return self.maps[0].shape
 
+class SphereSample:
+    def __init__(self, diameter, material):
+        self.diameter = diameter
+        self.material = material
 
 def quaternion_to_matrix(quat):
     """Dummy docstring"""
@@ -446,6 +450,27 @@ def calculate_fourier_from_map(sample, detector, photon_energy,
     return diff
 
 
+def calculate_fourier_from_sphere(sample, detector, photon_energy):
+    S = numpy.linalg.norm(detector.scattering_vector(photon_energy, (1, 0, 0, 0)), axis=0)
+
+    f_sum = 0
+    for element, ratio in sample.material.element_mass_ratios().items():
+        ratio /= sample.material.element_mass_ratio_sum()
+        f = elements.get_scattering_factor(element, photon_energy)
+        natoms_per_m3 = (sample.material.material_density()
+                            * ratio
+                            / (elements.ATOMIC_MASS[element] * constants.u))
+        f_sum += f * natoms_per_m3
+
+    # scaling = numpy.pi**2 * sample.diameter**3 * f_sum
+    # scaling = f_sum * (4/3 * numpy.pi * sample.diameter**3) * (numpy.pi)
+    scaling = f_sum * 4 * numpy.pi * sample.diameter**3
+
+    s = 2*numpy.pi*sample.diameter*S
+    structure = (numpy.sin(s) - s*numpy.cos(s))/s**3
+    return scaling*structure
+
+
 def fourier_to_pattern(diff, detector, source):
     pattern = abs(diff)**2
     pattern *= detector.solid_angle()
@@ -463,6 +488,12 @@ def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
     elif isinstance(sample, AbstractPDB):
         diff = calculate_fourier_from_pdb(
             sample, detector, source.photon_energy, rotation)
+    elif isinstance(sample, SphereSample):
+        diff = calculate_fourier_from_sphere(
+            sample, detector, source.photon_energy)
+    else:
+        raise NotImplementedError(f"Can't calculate pattern for sample type"
+                                  f"{type(sample)}")
     pattern = fourier_to_pattern(diff, detector, source)
     return pattern
     

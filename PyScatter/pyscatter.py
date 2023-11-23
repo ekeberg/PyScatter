@@ -1,5 +1,6 @@
 # import numpy
 import enum
+from collections.abc import Iterable
 
 try:
     import cupy
@@ -227,7 +228,10 @@ class RectangularDetector:
     def __init__(self, shape, pixel_size, distance, center=None):
         self.shape = shape
         self.distance = distance
-        self.pixel_size = [pixel_size, pixel_size]
+        if isinstance(pixel_size, Iterable):
+            self.pixel_size = pixel_size
+        else:
+            self.pixel_size = [pixel_size, pixel_size]
 
         if center is None:
             self.center = [s/2-0.5 for s in shape]
@@ -511,9 +515,10 @@ def calculate_fourier_from_sphere(sample, detector, photon_energy):
 
     # scaling = numpy.pi**2 * sample.diameter**3 * f_sum
     # scaling = f_sum * (4/3 * numpy.pi * sample.diameter**3) * (numpy.pi)
-    scaling = f_sum * 4 * numpy.pi * sample.diameter**3
+    radius = sample.diameter/2
+    scaling = f_sum * 4 * numpy.pi * radius**3
 
-    s = 2*numpy.pi*sample.diameter*S
+    s = 2*numpy.pi*radius*S
     structure = (numpy.sin(s) - s*numpy.cos(s))/s**3
     return scaling*structure
 

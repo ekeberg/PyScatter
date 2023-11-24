@@ -1,6 +1,7 @@
 import cupy
 import pathlib
 
+
 def import_cuda_file(filename, kernels):
     cuda_dir = pathlib.Path(__file__).parent.absolute()
     with open(cuda_dir / filename, 'r') as f:
@@ -15,6 +16,7 @@ def import_cuda_file(filename, kernels):
 
 kernels = import_cuda_file('cuda_extensions.cu',
                            ['calculate_scattering'])
+
 
 def calculate_scattering(element_diff, S, element_coords, element_occupancy,
                          bfactor=None):

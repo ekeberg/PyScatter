@@ -165,6 +165,7 @@ def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy,
 
 def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy,
                                     rotation=(1, 0, 0, 0)):
+    import cupy
     S = detector.scattering_vector(photon_energy, rotation)
 
     sf = StructureFactors()

@@ -1,27 +1,28 @@
+from dataclasses import dataclass
 import pickle
+from typing import Optional, Tuple
 import Bio.PDB
 import pathlib
 # from ..pyscatter import *
 from .. import pyscatter
+from ..pyscatter import detector
 numpy = pyscatter.numpy
-
+from numpy.typing import ArrayLike
 
 import importlib.resources as pkg_resources
 STRUCTURE_FACTOR_TABLE = pickle.loads(
     pkg_resources.read_binary("PyScatter", "structure_factors.p"))
 
 
-# STRUCTURE_FACTOR_TABLE = pickle.load(open(
-#     pathlib.Path(__file__).parent / "structure_factors.p", "rb"))
-                                          
-
 class StructureFactors:
+    """Class for calculating structure factors using the 9 parameter formula"""
     def __init__(self):        
         # self._table = pickle.load(open("structure_factors.p", "rb"))
         self._table = STRUCTURE_FACTOR_TABLE
         self.precalculated = {}
 
-    def structure_factor(self, element, s):
+    def structure_factor(self, element: str, s: ArrayLike
+                         ) -> ArrayLike:
         if element not in self._table:
             raise ValueError("Element {} is not recognized".format(element))
         s_A_half = s*1e-10/2
@@ -31,83 +32,70 @@ class StructureFactors:
                 p[4]*numpy.exp(-p[5]*s_A_half**2) +
                 p[6]*numpy.exp(-p[7]*s_A_half**2) + p[8])
 
-    def precalculate_for_element(self, element, S_array):
+    def precalculate_for_element(self, element: str, S_array: ArrayLike
+                                 ) -> None:
         self.precalculated[element] = pyscatter.real_type(
             self.structure_factor(element, S_array))
+        
 
+@dataclass
+class AtomsSample:
+    """A sample described by a list of atoms"""
+    natoms: int
+    coords: numpy.ndarray
+    elements: list
+    occupancy: numpy.ndarray
+    bfactor: numpy.ndarray = None
 
-class AbstractPDB:
-    def __init__(self, filename):
-        pass
-
-    def unique_elements(self):
-        # return numpy.unique(self.elements)
+    def unique_elements(self) -> list:
+        """Returns a list of the elements present in the sample"""
         return list(set(self.elements))
 
 
-class SimplePDB(AbstractPDB):
-    """Uses the Biopython parser"""
-    def __init__(self, filename, bfactor=False):
-        if pathlib.Path(filename).suffix.lower() == ".cif":
-            self._parser = Bio.PDB.MMCIFParser(QUIET=True)
-        else:
-            self._parser = Bio.PDB.PDBParser(QUIET=True)
-        self.struct = self._parser.get_structure("foo", filename)
+def read_pdb(filename: pathlib.Path, use_bfactor: bool=False, quiet: bool=True
+             ) -> AtomsSample:
+    """Uses the Biopython parser to read a .pdb or .cif file"""
+    if pathlib.Path(filename).suffix.lower() == ".cif":
+        parser = Bio.PDB.MMCIFParser(QUIET=quiet)
+    else:
+        parser = Bio.PDB.PDBParser(QUIET=quiet)
 
-        self.use_bfactor = bool(bfactor)
+    struct = parser.get_structure("foo", filename)
 
-        atoms = [a for a in self.struct.get_atoms()]
-        self.natoms = len(atoms)
-        # self.coords = real_type(numpy.zeros((self.natoms, 3)))
-        self.coords = pyscatter.always_numpy.zeros((self.natoms, 3))
-        self.elements = []
-        # self.occupancy = real_type(numpy.zeros(self.natoms))
-        self.occupancy = pyscatter.always_numpy.zeros(self.natoms)
+    atoms = [a for a in struct.get_atoms()]
+    natoms = len(atoms)
+    coords = pyscatter.real_type(numpy.zeros((natoms, 3)))
+    occupancy = pyscatter.real_type(numpy.zeros(natoms))
+    elements = []
 
-        if self.use_bfactor:
-            self.bfactor = pyscatter.always_numpy.zeros(self.natoms)
+    if use_bfactor:
+        bfactor = pyscatter.real_type(numpy.zeros(natoms))
+    else:
+        bfactor = None
 
-        for i, a in enumerate(atoms):
-            self.coords[i, :] = a.get_coord()*1e-10  # Convert to m            
-            self.elements.append(a.element.capitalize())
-            self.occupancy[i] = a.occupancy
-            if self.use_bfactor:
-                self.bfactor[i] = a.bfactor * 1e-20  # Convert to m^2
+    for i, a in enumerate(atoms):
+        coords[i, :] = pyscatter.real_type(a.get_coord()*1e-10)  # Convert to m            
+        elements.append(a.element.capitalize())
+        occupancy[i] = a.occupancy
+        if use_bfactor:
+            bfactor[i] = a.bfactor * 1e-20  # Convert to m^2
 
-        self.coords = pyscatter.real_type(self.coords)
-        self.occupancy = pyscatter.real_type(self.occupancy)
+    return AtomsSample(natoms, coords, elements, occupancy, bfactor)
 
 
-class SloppyPDB(AbstractPDB):
-    """Reads all atoms, regardless of if it makes sense or not"""
-    def __init__(self, filename, bfactor=False):
+def read_pdb_sloppy(filename: pathlib.Path, use_bfactor: bool=False
+                    ) -> AtomsSample:
+    """Reads all atoms of a .pdb file, regardless of if it makes sense or
+    not"""
+    use_bfactor = bool(use_bfactor)
 
-        self.use_bfactor = bool(bfactor)
+    coords = []
+    elements = []
+    occupancy = []
+    if use_bfactor:
+        bfactor = []
 
-        self.coords = []
-        self.elements = []
-        self.occupancy = []
-        if self.use_bfactor:
-            self.bfactor = []
-        
-        with open(filename) as f:
-            for line in f.readlines():
-                atom = self._parse_line(line)
-
-                if atom is not None:
-                    self.coords.append(atom["coord"])
-                    self.elements.append(atom["element"])
-                    self.occupancy.append(atom["occupancy"])
-                    if self.use_bfactor:
-                        self.bfactor.append(atom["bfactor"])
-
-        self.coords = pyscatter.real_type(numpy.array(self.coords))
-        self.occupancy = pyscatter.real_type(numpy.array(self.occupancy))
-        if self.use_bfactor:
-            self.bfactor = pyscatter.real_type(numpy.array(self.bfactor))
-        self.natoms = len(self.elements)
-                    
-    def _parse_line(self, line):
+    def parse_line(self, line):
         if (line[:4].upper() == "ATOM" or
                 line[:6].upper() == "HETATM"):
             atom = {}
@@ -122,31 +110,55 @@ class SloppyPDB(AbstractPDB):
         else:
             return None
 
+    with open(filename) as f:
+        for line in f.readlines():
+            atom = parse_line(line)
 
-def calculate_fourier_from_pdb(pdb, detector, photon_energy,
-                               rotation=(1, 0, 0, 0)):
+            if atom is not None:
+                coords.append(atom["coord"])
+                elements.append(atom["element"])
+                occupancy.append(atom["occupancy"])
+                if use_bfactor:
+                    bfactor.append(atom["bfactor"])
+
+    coords = pyscatter.real_type(numpy.array(coords))
+    occupancy = pyscatter.real_type(numpy.array(occupancy))
+    if use_bfactor:
+        bfactor = pyscatter.real_type(numpy.array(bfactor))
+    natoms = len(elements)
+    return AtomsSample(natoms, coords, elements, occupancy, bfactor)
+                
+
+def calculate_fourier(sample: AtomsSample, detector: detector.Detector,
+                      photon_energy: float,
+                      rotation: Tuple[float, float, float, float] = (1, 0, 0, 0)
+                      ) -> ArrayLike:
     if pyscatter.cupy_on():
-        return calculate_fourier_from_pdb_cuda(
-            pdb, detector, photon_energy, rotation)
+        return calculate_fourier_cuda(
+            sample, detector, photon_energy, rotation)
     else:
-        return calculate_fourier_from_pdb_cpu(
-            pdb, detector, photon_energy, rotation)
+        return calculate_fourier_cpu(
+            sample, detector, photon_energy, rotation)
 
 
-def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy,
-                                   rotation=(1, 0, 0, 0)):
+def calculate_fourier_cpu(sample: AtomsSample, detector: detector.Detector,
+                          photon_energy: float,
+                          rotation: Tuple[float, float, float, float] = (1, 0, 0, 0)
+                          ) -> ArrayLike:
     S = detector.scattering_vector(photon_energy, rotation)
     
     sf = StructureFactors()
-    for element in pdb.unique_elements():
+    for element in sample.unique_elements():
         sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=-1))
     
     diff = pyscatter.complex_type(numpy.zeros(detector.shape))
 
-    if pdb.use_bfactor:
+    use_bfactor = sample.bfactor is not None
+
+    if use_bfactor:
         S_abs = numpy.linalg.norm(S, axis=-1)
 
-    atom_iterator = zip(pdb.coords, pdb.occupancy, pdb.elements)
+    atom_iterator = zip(sample.coords, sample.occupancy, sample.elements)
     for coord, occupancy, element in atom_iterator:
         # coord_slice = (slice(None), ) + (None, )*len(S.shape[:-1])
         # dotp = (coord[coord_slice] * S).sum(axis=0)
@@ -156,49 +168,70 @@ def calculate_fourier_from_pdb_cpu(pdb, detector, photon_energy,
         atom_diff = (sf.precalculated[element] * occupancy *
                      numpy.exp(2j * numpy.pi * dotp))
 
-        if pdb.use_bfactor:
-            atom_diff *= numpy.exp(-pdb.bfactor * S_abs**2 * 0.25)
+        if use_bfactor:
+            atom_diff *= numpy.exp(-sample.bfactor * S_abs**2 * 0.25)
 
         diff += atom_diff
     return diff
 
 
-def calculate_fourier_from_pdb_cuda(pdb, detector, photon_energy,
-                                    rotation=(1, 0, 0, 0)):
-    import cupy
-    S = detector.scattering_vector(photon_energy, rotation)
+if pyscatter.cupy_on():
+    __kernels = pyscatter.cuda_tools.import_cuda_file(
+        'atoms_cuda.cu', ['calculate_scattering'])
 
-    sf = StructureFactors()
-    for element in pdb.unique_elements():
-        sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=-1))
-
-    diff = pyscatter.complex_type(numpy.zeros(detector.shape))
-
-    unique_elements = list(pyscatter.always_numpy.unique(pdb.elements))
-    for element in unique_elements:
-        selection = numpy.asarray(pyscatter.always_numpy.array(pdb.elements) == element,
-                                  dtype="bool")
-        element_coords = cupy.ascontiguousarray(pdb.coords[selection],
-                                                dtype="float32")
-        element_occupancy = cupy.ascontiguousarray(pdb.occupancy[selection],
-                                                   dtype="float32")
-        
-        if pdb.use_bfactor:
-            element_bfactor = cupy.ascontiguousarray(
-                pdb.bfactor[selection], dtype="float32")
+    def calculate_scattering(element_diff: ArrayLike,
+                             S: ArrayLike,
+                             element_coords: ArrayLike,
+                             element_occupancy: ArrayLike,
+                             bfactor: Optional[ArrayLike]=None) -> None:
+        if bfactor is None:
+            use_bfactor = False
         else:
-            element_bfactor = None
+            use_bfactor = True
 
-        element_diff = numpy.zeros_like(diff)
-        pyscatter.cuda_extensions.calculate_scattering(
-            element_diff, S, element_coords, element_occupancy,
-            bfactor=element_bfactor)
-        diff += sf.precalculated[element] * element_diff
-    return diff
+        nthreads = 256
+        nblocks = (element_diff.size - 1) // nthreads + 1
 
+        arguments = (element_diff, element_diff.size, S,
+                     element_coords, element_coords.shape[0],
+                     element_occupancy, use_bfactor, bfactor)
+        __kernels["calculate_scattering"]((nblocks, ), (nthreads, ), arguments)
 
-def calculate_pattern_from_pdb(pdb, detector, source, rotation=(1, 0, 0, 0)):
-    diff = calculate_fourier_from_pdb(
-        pdb, detector, source.photon_energy, rotation)
-    pattern = fourier_to_pattern(diff, detector, source)
-    return pattern
+    def calculate_fourier_cuda(sample: AtomsSample,
+                               detector: detector.Detector,
+                               photon_energy: float,
+                               rotation: Tuple[float, float, float, float] = (1, 0, 0, 0)
+                               ) -> ArrayLike:
+        import cupy
+        S = detector.scattering_vector(photon_energy, rotation)
+
+        sf = StructureFactors()
+        for element in sample.unique_elements():
+            sf.precalculate_for_element(element, numpy.linalg.norm(S, axis=-1))
+
+        diff = pyscatter.complex_type(numpy.zeros(detector.shape))
+
+        unique_elements = sample.unique_elements()
+        for element in unique_elements:
+            element_array = pyscatter.always_numpy.array(sample.elements)
+            selection = numpy.asarray(element_array == element,
+                                      dtype="bool")
+            element_coords = cupy.ascontiguousarray(
+                sample.coords[selection], dtype="float32")
+            element_occupancy = cupy.ascontiguousarray(
+                sample.occupancy[selection], dtype="float32")
+            
+            use_bfactor = sample.bfactor is not None
+
+            if use_bfactor:
+                element_bfactor = cupy.ascontiguousarray(
+                    sample.bfactor[selection], dtype="float32")
+            else:
+                element_bfactor = None
+
+            element_diff = numpy.zeros_like(diff)
+            pyscatter.cuda_extensions.calculate_scattering(
+                element_diff, S, element_coords, element_occupancy,
+                bfactor=element_bfactor)
+            diff += sf.precalculated[element] * element_diff
+        return diff

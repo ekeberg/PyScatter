@@ -11,7 +11,7 @@ class Backend(enum.Enum):
     CPU = 1
     CUPY = 2
 
-def set_backend(new_backend):
+def set_backend(new_backend: Backend) -> None:
     """Select if calculations are run on CPU or GPU"""
     global backend, numpy, always_numpy, scipy, fft
     global ndimage, real_type, complex_type
@@ -31,17 +31,17 @@ def set_backend(new_backend):
         raise ValueError(f"Unknown backend {backend}")
 
 
-def cupy_on():
+def cupy_on() -> bool:
     """Check if the backend is Backend.CUPY"""
     return backend == Backend.CUPY
 
 
-def cpu_on():
+def cpu_on() -> bool:
     """Check if the backend is Backend.CPU"""
     return backend == Backend.CPU
 
 
-def cpu_array(array):
+def numpy_array(array) -> numpy.ndarray:
     """Convert an array to standard numpy, regardless of start type"""
     if cupy and isinstance(array, cupy.ndarray):
         return array.get()

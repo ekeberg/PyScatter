@@ -1,14 +1,21 @@
 from collections.abc import Iterable
 from abc import ABC, abstractmethod
+from typing import Any, Optional, Tuple
 from eke import conversions
 from eke import constants
+from numpy.typing import ArrayLike
 
 from .backend import *
+from . import detector
 from . import samples
 
-def klein_nishina(energy, scattering_angle, polarization_angle):
+
+
+def cross_section(energy: float, scattering_angle: ArrayLike,
+                  polarization_angle: Optional[float] = None
+                  ) -> ArrayLike:
     """The cross section of a free electron. Energy given in eV, angles
-    given in radians."""
+    given in radians. Calculated using the Klein-Nishina formula."""
     energy_in_joules = conversions.ev_to_J(energy)
     rescaled_energy = energy_in_joules / (constants.me*constants.c**2)
 
@@ -27,15 +34,9 @@ def klein_nishina(energy, scattering_angle, polarization_angle):
     return cross_section
 
 
-def cross_section(detector, photon_energy, polarization_angle=None):
-    return klein_nishina(photon_energy,
-                         detector.scattering_angle(),
-                         polarization_angle)
-
-
 class Source:
-    def __init__(self, photon_energy, beam_energy, diameter,
-                 polarization_angle=None):
+    def __init__(self, photon_energy: float, beam_energy: float,
+                 diameter: float, polarization_angle: Optional[float] = None):
         self.photon_energy = photon_energy
         self.beam_energy = beam_energy
         self.diameter = diameter
@@ -46,25 +47,32 @@ class Source:
         self.intensity = self.number_of_photons / self.area
 
 
-def fourier_to_pattern(diff, detector, source):
+def fourier_to_pattern(diff: ArrayLike, detector: detector.Detector,
+                       source: Source) -> ArrayLike:
+    """Converts the diffraction pattern to scattered intensities. This also
+    scales with respect to detector solid angle, the cross section at different
+    scattering angles and the intensity of the source."""
     pattern = abs(diff)**2
     pattern *= detector.solid_angle()
-    pattern *= cross_section(detector,
-                             source.photon_energy,
+    pattern *= cross_section(source.photon_energy,
+                             detector.scattering_angle(),
                              source.polarization_angle)
     pattern *= source.intensity
     return pattern
 
 
-def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
+def calculate_pattern(sample: Any, detector: detector.Detector, source: Source,
+                      rotation: Tuple[float, float, float, float]=(1, 0, 0, 0)
+                      ) -> ArrayLike:
+    """Calculates the diffraction pattern"""
     if isinstance(sample, samples.MapSample):
-        diff = samples.map.calculate_fourier_from_map(
+        diff = samples.map.calculate_fourier(
             sample, detector, source.photon_energy, rotation)
-    elif isinstance(sample, samples.AbstractPDB):
-        diff = samples.atoms.calculate_fourier_from_pdb(
+    elif isinstance(sample, samples.AtomsSample):
+        diff = samples.atoms.calculate_fourier(
             sample, detector, source.photon_energy, rotation)
     elif isinstance(sample, samples.SphereSample):
-        diff = samples.sphere.calculate_fourier_from_sphere(
+        diff = samples.sphere.calculate_fourier(
             sample, detector, source.photon_energy)
     else:
         raise NotImplementedError(f"Can't calculate pattern for sample type"
@@ -73,7 +81,12 @@ def calculate_pattern(sample, detector, source, rotation=(1, 0, 0, 0)):
     return pattern
     
 
-def translate_fourier():
-    pass
-
-
+def translate_fourier(fourier_map: ArrayLike,
+                      scattering_vector: ArrayLike,
+                      translation: Tuple[float, float, float]
+                      ) -> ArrayLike:
+    """Translate a particle by multiplying it's Fourier transform (fourier_map)
+    by a phase ramp."""
+    dotp = scattering_vector @ translation
+    ramp = numpy.exp(2.j * numpy.pi * dotp)
+    return fourier_map * ramp

@@ -1,15 +1,19 @@
 import numpy
+from numpy.typing import ArrayLike
 from eke import elements
 from eke import constants
 from ..pyscatter import *
+from ..pyscatter import detector
 
 class SphereSample:
-    def __init__(self, diameter, material):
+    """A spherical sample"""
+    def __init__(self, diameter: float, material: elements.Material):
         self.diameter = diameter
         self.material = material
 
 
-def calculate_fourier_from_sphere(sample, detector, photon_energy):
+def calculate_fourier(sample: SphereSample, detector: detector.Detector,
+                      photon_energy: float) -> ArrayLike:
     S = numpy.linalg.norm(detector.scattering_vector(photon_energy, (1, 0, 0, 0)), axis=-1)
 
     f_sum = 0
@@ -21,8 +25,6 @@ def calculate_fourier_from_sphere(sample, detector, photon_energy):
                             / (elements.ATOMIC_MASS[element] * constants.u))
         f_sum += f * natoms_per_m3
 
-    # scaling = numpy.pi**2 * sample.diameter**3 * f_sum
-    # scaling = f_sum * (4/3 * numpy.pi * sample.diameter**3) * (numpy.pi)
     radius = sample.diameter/2
     scaling = f_sum * 4 * numpy.pi * radius**3
 

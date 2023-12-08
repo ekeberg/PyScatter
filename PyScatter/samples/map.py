@@ -1,8 +1,6 @@
-from typing import Tuple
-# import numpy
-from ..pyscatter import numpy
+from typing import Tuple, Optional
 from numpy.typing import ArrayLike
-from ..pyscatter import *
+from ..backend import backend
 from ..pyscatter import detector
 from eke import elements
 from eke import constants
@@ -11,6 +9,8 @@ try:
     import nfft
 except ImportError:
     nfft = None
+
+Quaternion = Tuple[float, float, float, float]
 
 
 class MapSample:
@@ -59,12 +59,12 @@ def get_scat_map(distribution: ArrayLike, material: elements.Material,
 
 def calculate_fourier(sample: MapSample, detector: detector.Detector,
                       photon_energy: float,
-                      rotation: Tuple[float, float, float, float]=(1, 0, 0, 0)
+                      rotation: Quaternion = (1, 0, 0, 0)
                       ) -> ArrayLike:
     if nfft is None:
         raise RuntimeError("Could not import nfft")
 
-    total_density_map = numpy.zeros(sample.shape, dtype="complex128")
+    total_density_map = backend.zeros(sample.shape, dtype="complex128")
 
     for material, material_map in zip(sample.materials, sample.maps):
         total_density_map += get_scat_map(material_map,
@@ -73,7 +73,7 @@ def calculate_fourier(sample: MapSample, detector: detector.Detector,
                                           photon_energy)
 
     S = detector.scattering_vector(photon_energy, rotation)
-    S_flat = S.reshape((numpy.product(detector.shape), 3))
+    S_flat = S.reshape((backend.product(detector.shape), 3))
     diff = nfft.nfft(total_density_map, sample.pixel_size, S_flat)
     diff = diff.reshape(detector.shape)
     return diff

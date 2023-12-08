@@ -7,53 +7,68 @@ except ImportError:
 
 
 class Backend(enum.Enum):
-    """Enum coding for the available backends"""
-    CPU = 1
-    CUPY = 2
-
-def set_backend(new_backend: Backend) -> None:
-    """Select if calculations are run on CPU or GPU"""
-    global backend, numpy, always_numpy, scipy, fft
-    global ndimage, real_type, complex_type
-    backend = new_backend
-    if backend == Backend.CPU:
-        import numpy
-        always_numpy = numpy
-        real_type = numpy.float32
-        complex_type = numpy.complex64
-    elif backend == Backend.CUPY:
-        import cupy as numpy
-        import numpy as always_numpy
-        import functools
-        real_type = functools.partial(numpy.asarray, dtype="float32")
-        complex_type = functools.partial(numpy.asarray, dtype="complex64")
-    else:
-        raise ValueError(f"Unknown backend {backend}")
+    NUMPY = numpy
+    CUPY = cupy
 
 
-def cupy_on() -> bool:
-    """Check if the backend is Backend.CUPY"""
-    return backend == Backend.CUPY
+class BackendContext:
+    def __init__(self):
+        self._backend = Backend.NUMPY
+
+    @property
+    def backend(self):
+        return self._backend
+
+    @backend.setter
+    def backend(self, backend):
+        if backend in Backend:
+            self._backend = backend
+        else:
+            raise ValueError(f"Unknown backend {backend}")
+
+    def __enter__(self):
+        self._old_backend = self._backend
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._backend = self._old_backend
+
+    def __getattr__(self, name):
+        return getattr(self._backend.value, name)
+
+    def is_numpy(self):
+        return self._backend == Backend.NUMPY
+
+    def is_cupy(self):
+        return self._backend == Backend.CUPY
+
+    def asnumpy(self, array):
+        if self._backend == Backend.CUPY and isinstance(array, cupy.ndarray):
+            return array.get()
+        else:
+            return array
+
+    def real_type(self, array):
+        if self._backend == Backend.CUPY:
+            return cupy.asarray(array, dtype="float32")
+        else:
+            return numpy.asarray(array, dtype="float32")
+
+    def complex_type(self, array):
+        if self._backend == Backend.CUPY:
+            return cupy.asarray(array, dtype="complex64")
+        else:
+            return numpy.asarray(array, dtype="complex64")
 
 
-def cpu_on() -> bool:
-    """Check if the backend is Backend.CPU"""
-    return backend == Backend.CPU
-
-
-def numpy_array(array) -> numpy.ndarray:
-    """Convert an array to standard numpy, regardless of start type"""
-    if cupy and isinstance(array, cupy.ndarray):
-        return array.get()
-    else:
-        return array
-
+backend = BackendContext()
 
 if cupy and cupy.cuda.is_available():
-    set_backend(Backend.CUPY)
+    backend.backend = Backend.CUPY
+    from . import cuda_tools
     print("Using Cupy backend")
-    from . import cuda_extensions
 else:
-    set_backend(Backend.CPU)
-    print("Using CPU backend")
+    backend.backend = Backend.NUMPY
+    cuda_tools = None
+    print("Using Numpy backend")
 

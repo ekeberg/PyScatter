@@ -1,11 +1,10 @@
 import numpy
 import PyScatter
-import nfft
+import condor
 from eke import elements
 from eke import tools
 from eke import rotmodule
 from eke import conversions
-from eke import constants
 from eke import time_tools
 
 photon_energy = 2000
@@ -20,24 +19,24 @@ map_shape = (64, )*3
 particle_size = 20e-9
 
 material = elements.MATERIALS["protein"]
-density_map = numpy.roll(tools.round_mask(map_shape, 10), 10, axis=0) + numpy.roll(tools.round_mask(map_shape, 10), -10, axis=0)
+density_map = (numpy.roll(tools.round_mask(map_shape, 10), 10, axis=0) +
+               numpy.roll(tools.round_mask(map_shape, 10), -10, axis=0))
 
 w = time_tools.StopWatch()
 w.start()
 
-det = PyScatter.RectangularDetector(pattern_shape, pixel_size, detector_distance)
+det = PyScatter.RectangularDetector(pattern_shape, pixel_size,
+                                    detector_distance)
 src = PyScatter.Source(photon_energy, pulse_energy, focus_diameter)
 rot = rotmodule.random()
 # rot = rotmodule.from_angle_and_dir(0.9, (1, 1, 1))
 
-sample = PyScatter.MapSample(particle_size/map_shape[0], density_map, material)
+sample = PyScatter.samples.MapSample(particle_size/map_shape[0], density_map,
+                                     material)
 pattern = PyScatter.calculate_pattern(sample, det, src, rot)
 
 w.stop()
 print(f"PyScatter took {w.time()} s")
-
-
-import condor
 
 w.start()
 
@@ -48,13 +47,14 @@ source = condor.Source(wavelength=conversions.ev_to_m(photon_energy),
 detector = condor.Detector(distance=detector_distance,
                            pixel_size=pixel_size,
                            nx=pattern_shape[0], ny=pattern_shape[1],
-                           cx=pattern_shape[0]/2-0.5, cy=pattern_shape[1]/2-0.5)
+                           cx=pattern_shape[0]/2-0.5,
+                           cy=pattern_shape[1]/2-0.5)
 
 condor_map = numpy.bool_(density_map).swapaxes(0, 2)
 
 particle = condor.ParticleMap(map3d=condor_map,
                               dx=particle_size/map_shape[0],
-                              geometry="custom", 
+                              geometry="custom",
                               material_type="custom",
                               massdensity=material.material_density(),
                               atomic_composition=material.element_ratios(),
@@ -70,17 +70,21 @@ condor_pattern = result["entry_1"]["data_1"]["data"]
 w.stop()
 print(f"Condor took {w.time()} s")
 
+print(f"Norm: {numpy.linalg.norm(pattern - condor_pattern)}")
+
+
 def plot_results():
     import matplotlib.pyplot
     vmax = max(pattern.max(), condor_pattern.max())
     vmin = vmax * 1e-7
+    norm = matplotlib.colors.LogNorm(vmin=vmin, vmax=vmax)
 
     fig = matplotlib.pyplot.figure("Compare")
     fig.clear()
     ax = fig.subplots(1, 2)
-    p0 = ax[0].imshow(pattern, norm=matplotlib.colors.LogNorm())#vmin=vmin, vmax=vmax))
+    p0 = ax[0].imshow(pattern, norm=norm)
     fig.colorbar(p0)
-    p1 = ax[1].imshow(condor_pattern, norm=matplotlib.colors.LogNorm())#vmin=vmin, vmax=vmax))
+    p1 = ax[1].imshow(condor_pattern, norm=norm)
     fig.colorbar(p1)
 
 

@@ -1,6 +1,7 @@
 import cupy
 import pathlib
 
+
 def import_cuda_file(filename: pathlib.Path, kernels: list[str]
                      ) -> dict[str, cupy.RawKernel]:
     cuda_dir = pathlib.Path(__file__).parent.absolute()

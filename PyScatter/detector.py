@@ -1,23 +1,22 @@
 from abc import ABC, abstractmethod
-from typing import Iterable, Protocol, Tuple
-
+from typing import Iterable, Optional, Protocol, Tuple
 import numpy
 from numpy.typing import ArrayLike
 from eke import conversions
-
-from .pyscatter import *
+from .backend import backend
 
 Quaternion = Tuple[float, float, float, float]
 
+
 def quaternion_to_matrix(quat: ArrayLike) -> ArrayLike:
     """Return the rotation matrix corresponding to a rotation quaternion."""
-    quat = real_type(numpy.array(quat))
+    quat = backend.real_type(numpy.array(quat))
     if len(quat.shape) < 2:
-        matrix = real_type(
-            numpy.zeros((3, 3), dtype=quat.dtype))
+        matrix = backend.real_type(
+            backend.zeros((3, 3), dtype=quat.dtype))
     else:
-        matrix = real_type(
-            numpy.zeros((len(quat), 3, 3), dtype=quat.dtype))
+        matrix = backend.real_type(
+            backend.zeros((len(quat), 3, 3), dtype=quat.dtype))
 
     matrix[..., 0, 0] = (quat[..., 0]**2 + quat[..., 1]**2
                          - quat[..., 2]**2 - quat[..., 3]**2)
@@ -47,7 +46,7 @@ def rotate(quat: Quaternion,
     rotation_matrix = quaternion_to_matrix(quat)
 
     coordinates_flat = coordinates.reshape(
-        (always_numpy.product(coordinates.shape[:-1]), 3))
+        (backend.product(coordinates.shape[:-1]), 3))
     rotated_flat = coordinates_flat @ rotation_matrix.T
     return rotated_flat.reshape(coordinates.shape)
 
@@ -55,14 +54,14 @@ def rotate(quat: Quaternion,
 def solid_angle_rectangular_pixels(x: ArrayLike, y: ArrayLike,
                                    pixel_size: Tuple[float, float],
                                    distance: float) -> ArrayLike:
-    """Calculate the solid angle of a set of rectangular pixels with 
+    """Calculate the solid angle of a set of rectangular pixels with
     respective centers given by x and y."""
     def omega(width: ArrayLike, height: ArrayLike
               ) -> ArrayLike:
         return 4 * numpy.arcsin(
             numpy.sin(numpy.arctan(width/2/distance)) *
             numpy.sin(numpy.arctan(height/2/distance)))
-    
+
     solid_angle = (omega(2 * (x+pixel_size[0]/2),
                          2 * (y+pixel_size[1]/2)) +
                    omega(2 * (x-pixel_size[0]/2),
@@ -72,6 +71,7 @@ def solid_angle_rectangular_pixels(x: ArrayLike, y: ArrayLike,
                    omega(2 * (x-pixel_size[0]/2),
                          2 * (y+pixel_size[1]/2))) / 4
     return solid_angle
+
 
 class Detector(ABC):
     """Any detector"""
@@ -92,6 +92,7 @@ class Detector(ABC):
         """The scattering angle for each pixel in the detector"""
         pass
 
+
 class PhysicalDetector(Detector):
     """A detector that can be interpreted as a collection of pixels with
     a location in space"""
@@ -100,7 +101,7 @@ class PhysicalDetector(Detector):
                           ) -> ArrayLike:
         wavelength = conversions.ev_to_m(photon_energy)
 
-        s0 = 1/wavelength * real_type(numpy.array([0, 0, 1]))
+        s0 = 1/wavelength * backend.real_type(numpy.array([0, 0, 1]))
 
         s1_norm = numpy.sqrt(self.x**2 + self.y**2 + self.z**2)
         s1 = numpy.stack([1/wavelength * self.x / s1_norm,
@@ -109,7 +110,7 @@ class PhysicalDetector(Detector):
         S = s1 - s0[numpy.newaxis, numpy.newaxis, :]
         S_rot = rotate(rotation, S)
         return S_rot
-    
+
     def scattering_angle(self) -> ArrayLike:
         perp_dist = numpy.sqrt(self.x**2 + self.y**2)
         scattering_angle = numpy.arctan(perp_dist / self.z)
@@ -118,7 +119,7 @@ class PhysicalDetector(Detector):
 
 class RectangularDetector(PhysicalDetector):
     """A standard rectangular detector with rectangular pixels."""
-    def __init__(self, shape: Tuple[int, int, int],
+    def __init__(self, shape: Tuple[int, int],
                  pixel_size: Tuple[float, float],
                  distance: float,
                  center: Optional[Tuple[float, float]] = None):
@@ -134,15 +135,15 @@ class RectangularDetector(PhysicalDetector):
             self.center = [s/2-0.5 for s in shape]
         else:
             self.center = center
-        
+
         self.y, self.x = numpy.meshgrid(
             self.pixel_size[0]*(numpy.arange(self.shape[0])-self.center[0]),
             self.pixel_size[1]*(numpy.arange(self.shape[1])-self.center[1]),
             indexing="ij")
-        
-        self.y = real_type(self.y)
-        self.x = real_type(self.x)
-        self.z = self.distance*real_type(numpy.ones(self.shape))
+
+        self.y = backend.real_type(self.y)
+        self.x = backend.real_type(self.x)
+        self.z = self.distance*backend.real_type(numpy.ones(self.shape))
 
     def solid_angle(self) -> ArrayLike:
         return solid_angle_rectangular_pixels(self.x, self.y, self.pixel_size,
@@ -151,21 +152,21 @@ class RectangularDetector(PhysicalDetector):
 
 class Geometry(Protocol):
     pixel_size: float
+
     def get_pixel_positions(self) -> ArrayLike:
         ...
 
-    
 
 class GeomDetector(PhysicalDetector):
     """A detector described by a geometry file. The solid angle calculation
     only works if the detector has rectangular pixels in a regular grid."""
     def __init__(self, geom):
-        self.pixel_size = [geom.pixel_size, geom.pixel_size]        
-        
+        self.pixel_size = [geom.pixel_size, geom.pixel_size]
+
         p = geom.get_pixel_positions()
-        self.x = real_type(p[..., 0])
-        self.y = real_type(p[..., 1])
-        self.z = real_type(p[..., 2])
+        self.x = backend.real_type(p[..., 0])
+        self.y = backend.real_type(p[..., 1])
+        self.z = backend.real_type(p[..., 2])
         self.distance = self.z.mean()
         self.shape = self.x.shape
 
@@ -186,9 +187,9 @@ class FourierDetector(Detector):
             *[numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, s)
               for s in self.shape],
             indexing="ij")
-        self._x = real_type(self._x)
-        self._y = real_type(self._y)
-        self._z = real_type(self._z)
+        self._x = backend.real_type(self._x)
+        self._y = backend.real_type(self._y)
+        self._z = backend.real_type(self._z)
 
     def scattering_angle(self) -> ArrayLike:
         """The scattering angle that each pixel would have if it was part of

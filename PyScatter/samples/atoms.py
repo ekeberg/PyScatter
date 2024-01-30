@@ -190,7 +190,7 @@ def calculate_fourier_cpu(sample: AtomsSample, detector: Detector,
 
 if backend.is_cupy():
     __kernels = cuda_tools.import_cuda_file(
-        'atoms_cuda.cu', ['calculate_scattering'])
+        'samples/atoms_cuda.cu', ['calculate_scattering'])
 
     def _calculate_scattering(element_diff: ArrayLike,
                               S: ArrayLike,

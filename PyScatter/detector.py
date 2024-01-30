@@ -46,7 +46,7 @@ def rotate(quat: Quaternion,
     rotation_matrix = quaternion_to_matrix(quat)
 
     coordinates_flat = coordinates.reshape(
-        (backend.prod(coordinates.shape[:-1]), 3))
+        (numpy.prod(coordinates.shape[:-1]), 3))
     rotated_flat = coordinates_flat @ rotation_matrix.T
     return rotated_flat.reshape(coordinates.shape)
 

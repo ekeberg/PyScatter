@@ -1,4 +1,5 @@
-tests/*
+scratch/*
 PyScatter/__pycache__/*
 PyScatter/samples/__pycache__/*
 PyScatter.egg-info/*
+*.cpython*

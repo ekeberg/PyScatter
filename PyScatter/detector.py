@@ -46,7 +46,7 @@ def rotate(quat: Quaternion,
     rotation_matrix = quaternion_to_matrix(quat)
 
     coordinates_flat = coordinates.reshape(
-        (backend.product(coordinates.shape[:-1]), 3))
+        (backend.prod(coordinates.shape[:-1]), 3))
     rotated_flat = coordinates_flat @ rotation_matrix.T
     return rotated_flat.reshape(coordinates.shape)
 
@@ -136,6 +136,8 @@ class RectangularDetector(PhysicalDetector):
         else:
             self.center = center
 
+        # This axis swap is neccessary to get the positive z-axis pointing
+        # in the direction of the beam.
         self.y, self.x = numpy.meshgrid(
             self.pixel_size[0]*(numpy.arange(self.shape[0])-self.center[0]),
             self.pixel_size[1]*(numpy.arange(self.shape[1])-self.center[1]),
@@ -183,10 +185,17 @@ class FourierDetector(Detector):
 
         unscaled_fourier_max = (2*numpy.sin(max_scatt_angle/2))
 
-        self._x, self._y, self._z = numpy.meshgrid(
-            *[numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, s)
-              for s in self.shape],
-            indexing="ij")
+        # CHANGED WHILE WRITING TESTS
+        # Attempt to make coordinates consistent with 2D detectors
+        # self._x, self._y, self._z = numpy.meshgrid(
+        #     *[numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, s)
+        #       for s in self.shape],
+        #     indexing="ij")
+        self._y, self._x, self._z = numpy.meshgrid(
+        *[numpy.linspace(-unscaled_fourier_max, unscaled_fourier_max, s)
+            for s in self.shape],
+        indexing="ij")
+
         self._x = backend.real_type(self._x)
         self._y = backend.real_type(self._y)
         self._z = backend.real_type(self._z)

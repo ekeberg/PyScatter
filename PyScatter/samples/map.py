@@ -1,3 +1,4 @@
+import numpy
 from typing import Tuple, Optional
 from numpy.typing import ArrayLike
 from ..backend import backend
@@ -53,7 +54,7 @@ def get_scat_map(distribution: ArrayLike, material: elements.Material,
                             * ratio
                             / (elements.ATOMIC_MASS[element] * constants.u))
         f_sum += f * natoms_per_pixel
-    scat_map = distribution * f_sum
+    scat_map = backend.real_type(distribution) * f_sum
     return scat_map
 
 
@@ -64,7 +65,7 @@ def calculate_fourier(sample: MapSample, detector: detector.Detector,
     if nfft is None:
         raise RuntimeError("Could not import nfft")
 
-    total_density_map = backend.zeros(sample.shape, dtype="complex128")
+    total_density_map = backend.complex_type(backend.zeros(sample.shape))
 
     for material, material_map in zip(sample.materials, sample.maps):
         total_density_map += get_scat_map(material_map,
@@ -73,7 +74,8 @@ def calculate_fourier(sample: MapSample, detector: detector.Detector,
                                           photon_energy)
 
     S = detector.scattering_vector(photon_energy, rotation)
-    S_flat = S.reshape((backend.product(detector.shape), 3))
-    diff = nfft.nfft(total_density_map, sample.pixel_size, S_flat)
+    S_flat = S.reshape((numpy.product(detector.shape), 3))
+    diff = nfft.nfft(backend.asnumpy(total_density_map), sample.pixel_size, backend.asnumpy(S_flat))
     diff = diff.reshape(detector.shape)
+    diff = backend.complex_type(diff)
     return diff

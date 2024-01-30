@@ -70,7 +70,7 @@ condor_pattern = result["entry_1"]["data_1"]["data"]
 w.stop()
 print(f"Condor took {w.time()} s")
 
-print(f"Norm: {numpy.linalg.norm(pattern - condor_pattern)}")
+print(f"Norm: {numpy.linalg.norm(PyScatter.backend.asnumpy(pattern) - condor_pattern)}")
 
 
 def plot_results():
